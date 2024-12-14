@@ -1,0 +1,23 @@
+{
+    "manifest_version": 3,
+    "name": "PokeLinker",
+    "version": "1.0",
+    "description": "「ポケモン徹底攻略」から「ポケモンバトルデータベース」へのリンクを生成、表示します。",
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "permissions": [
+      "storage"
+    ],
+    "content_scripts": [
+      {
+        "matches": ["https://yakkun.com/sv/zukan/n*"],
+        "js": ["content.js"]
+      }
+    ],
+    "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'self';"
+    }
+  }
