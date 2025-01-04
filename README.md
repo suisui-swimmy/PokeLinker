@@ -3,6 +3,8 @@
 - popupで設定変更(新規タブorそのまま遷移)
 
 # PokeLinker
+https://chromewebstore.google.com/detail/pokelinker/pkgppnlbbeomjlfkaaganhfbcmcenmcl
+
 「ポケモン徹底攻略」の各ポケモンのページに「ポケモンバトルデータベース」へのリンクを生成し表示するchrome/Edgeの拡張機能です。
 
 ![README_1.png](https://github.com/suisui-swimmy/PokeLinker/blob/main/README_1.png?raw=true)
