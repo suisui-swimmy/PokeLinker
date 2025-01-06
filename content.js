@@ -1,6 +1,6 @@
 class PokeLinker {
   constructor() {
-    this.SEASON_START = new Date('2023-12-01T00:00:00+09:00');
+    this.SEASON_START = new Date('2022-12-01T00:00:00+09:00');
     this.SEASON_25_START = new Date('2024-12-01T00:00:00+09:00');
     this.SEASON_25_END = new Date('2025-01-06T08:59:00+09:00');
     this.UPDATE_INTERVAL = 60000;
