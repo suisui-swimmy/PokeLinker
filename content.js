@@ -1,8 +1,6 @@
 class PokeLinker {
   constructor() {
-    this.SEASON_START = new Date('2022-12-01T00:00:00+09:00');
-    this.SEASON_25_START = new Date('2024-12-01T00:00:00+09:00');
-    this.SEASON_25_END = new Date('2025-01-06T08:59:00+09:00');
+    this.SEASON_START = new Date('2022-12-01T09:00:00+09:00');
     this.UPDATE_INTERVAL = 60000;
     this.DEBOUNCE_WAIT = 200;
 
@@ -241,26 +239,12 @@ class PokeLinker {
   }
 
 
-  isInSeason25Period(date) {
-    return date >= this.SEASON_25_START && date <= this.SEASON_25_END;
-  }
-
-
   async calculateCurrentSeason() {
     const now = new Date();
-
-    if (this.isInSeason25Period(now)) {
-      return 25;
-    }
-
-    const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1, 9);
-    const monthsDiff = Math.floor((now - this.SEASON_START) / (30 * 24 * 60 * 60 * 1000));
-
-    if (now >= currentMonth) {
-      return monthsDiff + 1;
-    } else {
-      return Math.max(1, monthsDiff);
-    }
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 9);
+    const monthsSinceStart = Math.floor((now - this.SEASON_START) / (30.44 * 24 * 60 * 60 * 1000));
+    
+    return now >= currentMonthStart ? monthsSinceStart + 1 : monthsSinceStart;
   }
 
 
