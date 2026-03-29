@@ -1,7 +1,3 @@
-### 更新予定(メモ)
-- シーズンにレギュレーション併記
-- popupで設定変更(新規タブorそのまま遷移)
-
 # PokeLinker
 https://chromewebstore.google.com/detail/pokelinker/pkgppnlbbeomjlfkaaganhfbcmcenmcl
 
@@ -31,5 +27,3 @@ https://chromewebstore.google.com/detail/pokelinker/pkgppnlbbeomjlfkaaganhfbcmce
 
 # お問い合わせ
 [X(@peixe0307)](https://x.com/peixe0307)
-
-  

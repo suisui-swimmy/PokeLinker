@@ -3,6 +3,55 @@ class PokeLinker {
     this.SEASON_START = new Date('2022-12-01T09:00:00+09:00');
     this.UPDATE_INTERVAL = 60000;
     this.DEBOUNCE_WAIT = 200;
+    this.STYLE_ID = 'pokelinker-style';
+    // SVのシーズン更新終了に合わせて固定。再開時はこのフラグをtrueに戻す。
+    this.SEASON_AUTO_UPDATE_ENABLED = false;
+    this.FINAL_SEASON = 41;
+    // select要素とchrome.storage.localで扱いやすいよう、シーズン値は文字列で統一する。
+    this.FIXED_SEASON_OPTIONS = [
+      ['41', '41~(I)'],
+      ['40', '40(I)'],
+      ['39', '39(I)'],
+      ['38', '38(I)'],
+      ['37', '37(J)'],
+      ['36', '36(J)'],
+      ['35', '35(J)'],
+      ['34', '34(J)'],
+      ['33', '33(I)'],
+      ['32', '32(I)'],
+      ['31', '31(I)'],
+      ['30', '30(I)'],
+      ['29', '29(G)'],
+      ['28', '28(G)'],
+      ['27', '27(G)'],
+      ['26', '26(G)'],
+      ['25', '25(H)'],
+      ['24', '24(H)'],
+      ['23', '23(H)'],
+      ['22', '22(H)'],
+      ['21', '21(G)'],
+      ['20', '20(G)'],
+      ['19', '19(G)'],
+      ['18', '18(G)'],
+      ['17', '17(F)'],
+      ['16', '16(F)'],
+      ['15', '15(F)'],
+      ['14', '14(F)'],
+      ['13', '13(E)'],
+      ['12', '12(E)'],
+      ['11', '11(E)'],
+      ['10', '10(D+)'],
+      ['9', '9(D)'],
+      ['8', '8(D)'],
+      ['7', '7(C)'],
+      ['6', '6(C)'],
+      ['5', '5(C)'],
+      ['4', '4(B)'],
+      ['3', '3(B)'],
+      ['2', '2(A)'],
+      ['1', '1(A)'],
+    ];
+    this.availableSeasons = new Set(this.FIXED_SEASON_OPTIONS.map(([value]) => value));
 
     this.settings = {
       battleType: null,
@@ -13,19 +62,23 @@ class PokeLinker {
 
     this.elements = {};
     this.updateTimer = null;
+    this.intersectionObserver = null;
+    this.seasonUpdateInterval = null;
 
     this.loadSettings();
   }
 
 
+  // 保存済み設定を読み込み、現在のUI仕様に合う値へ正規化する。
   async loadSettings() {
     try {
       const result = await chrome.storage.local.get(['battleType', 'season']);
       this.settings.battleType = result.battleType || null;
       
-      // 起動時に現在のシーズンを計算
-      this.currentSeason = await this.calculateCurrentSeason();
-      this.settings.season = result.season || this.currentSeason;
+      this.currentSeason = await this.getLatestSeason();
+      const storedSeason = result.season?.toString();
+      const normalizedSeason = this.normalizeSeason(storedSeason || this.currentSeason);
+      this.settings.season = normalizedSeason;
 
       if (this.elements.singleCheck) {
         this.elements.singleCheck.checked = (this.settings.battleType === 'single');
@@ -35,6 +88,10 @@ class PokeLinker {
       }
       if (this.elements.seasonSelect) {
         this.elements.seasonSelect.value = this.settings.season;
+      }
+
+      if (storedSeason !== normalizedSeason) {
+        await this.saveSettings();
       }
 
       this.updatePBDBLink();
@@ -56,8 +113,14 @@ class PokeLinker {
   }
 
 
+  // 初期化リトライ時に<style>が増殖しないよう、共通スタイルは1回だけ挿入する。
   createStyles() {
+    if (document.getElementById(this.STYLE_ID)) {
+      return;
+    }
+
     const style = document.createElement('style');
+    style.id = this.STYLE_ID;
     style.textContent = `
       .pokelinker-container {
         display: flex;
@@ -136,6 +199,7 @@ class PokeLinker {
   }
 
 
+  // ページタイトル直下に、バトル種別・シーズン・PBDBリンクの操作群を組み立てる。
   createLinkElements() {
     const container = document.createElement('div');
     container.className = 'pokelinker-container';
@@ -167,7 +231,7 @@ class PokeLinker {
     const seasonSelect = document.createElement('select');
     seasonSelect.title = 'Select a season';
     this.createSeasonOptions(seasonSelect);
-    seasonSelect.value = this.settings.season;
+    seasonSelect.value = this.normalizeSeason(this.settings.season);
     seasonWrapper.appendChild(seasonSelect);
 
     const pbdbLink = document.createElement('a');
@@ -228,34 +292,47 @@ class PokeLinker {
   }
 
 
-  async createSeasonOptions(select) {
-    const currentSeason = await this.calculateCurrentSeason();
-
-    for (let i = currentSeason; i >= 1; i--) {
+  // 固定シーズン一覧からドロップダウンを再構築し、保存済み値と表示を揃える。
+  createSeasonOptions(select) {
+    for (const [value, label] of this.FIXED_SEASON_OPTIONS) {
       const option = document.createElement('option');
-      option.value = i.toString();
-      option.textContent = (i === currentSeason) ? `${i}(最新)` : i.toString();
+      option.value = value;
+      option.textContent = label;
       select.appendChild(option);
     }
 
-    select.value = this.settings.season || currentSeason.toString();
+    select.value = this.normalizeSeason(this.settings.season);
   }
 
 
+  async getLatestSeason() {
+    if (!this.SEASON_AUTO_UPDATE_ENABLED) {
+      return this.FINAL_SEASON;
+    }
+
+    return this.calculateCurrentSeason();
+  }
+
+
+  // 保存済み値が古い最新シーズンを指していても、現行の固定一覧へ戻す。
+  normalizeSeason(season) {
+    const seasonValue = season?.toString() || this.FINAL_SEASON.toString();
+    return this.availableSeasons.has(seasonValue)
+      ? seasonValue
+      : this.FINAL_SEASON.toString();
+  }
+
+
+  // 将来シーズン更新が再開したとき用に、月次シーズン計算ロジックは残しておく。
   async calculateCurrentSeason() {
     const now = new Date();
     const startYear = this.SEASON_START.getFullYear();
     const startMonth = this.SEASON_START.getMonth();
     
-    // シーズン1が2022年12月からだとすると
-    // 2022年12月 = シーズン1
-    // 2023年1月 = シーズン2
-    // という計算になるため
-    
-    // 年の差 * 12 + 現在の月 - 開始月 + 1
+    // シーズン1=2022年12月として、経過月数からシーズン番号を算出する。
     let seasonNumber = (now.getFullYear() - startYear) * 12 + (now.getMonth() - startMonth) + 1;
     
-    // 1日の9時より前なら、まだ前のシーズン
+    // シーズン切り替えは毎月1日9:00想定のため、それ以前は前シーズン扱いにする。
     if (now.getDate() === 1 && now.getHours() < 9) {
       seasonNumber--;
     }
@@ -264,6 +341,7 @@ class PokeLinker {
   }
 
 
+  // 図鑑ページから全国図鑑番号と現在表示中フォルムを拾い、PBDB用のIDへ変換する。
   async getPokemonInfo() {
     if (this.pokemonInfo) return this.pokemonInfo;
 
@@ -312,6 +390,7 @@ class PokeLinker {
   }
 
 
+  // リンク先はバトル種別と対象ポケモンが揃ったときだけ有効化する。
   async updatePBDBLink() {
     if (!this.elements.pbdbLink) return;
 
@@ -335,7 +414,10 @@ class PokeLinker {
   }
 
 
+  // 図鑑ページ側の描画タイミングに合わせて、要素が見えたらリンクを再評価する。
   setupIntersectionObserver() {
+    this.intersectionObserver?.disconnect();
+
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach(entry => {
@@ -350,19 +432,35 @@ class PokeLinker {
     if (this.elements.container) {
       observer.observe(this.elements.container);
     }
+
+    this.intersectionObserver = observer;
   }
 
 
   updateSeasonOptions() {
     if (!this.elements.seasonSelect) return;
-    
-    // 既存のオプションをクリア
-    while (this.elements.seasonSelect.firstChild) {
-      this.elements.seasonSelect.removeChild(this.elements.seasonSelect.firstChild);
-    }
-    
-    // 新しいオプションを追加
+
+    // 古い選択肢を捨てて、固定シーズン一覧から再描画する。
+    this.elements.seasonSelect.replaceChildren();
     this.createSeasonOptions(this.elements.seasonSelect);
+  }
+
+
+  // 旧来の最新シーズン追従処理は、再利用できるよう別メソッドとして温存する。
+  startSeasonUpdateWatcher() {
+    if (!this.SEASON_AUTO_UPDATE_ENABLED) {
+      return;
+    }
+
+    clearInterval(this.seasonUpdateInterval);
+    this.seasonUpdateInterval = setInterval(async () => {
+      const newSeason = await this.calculateCurrentSeason();
+      if (newSeason !== this.currentSeason) {
+        this.currentSeason = newSeason;
+        this.updateSeasonOptions();
+        await this.loadSettings();
+      }
+    }, this.UPDATE_INTERVAL);
   }
 
 
@@ -375,27 +473,21 @@ class PokeLinker {
     const linkContainer = this.createLinkElements();
     titleElement.parentNode.insertAdjacentElement('afterend', linkContainer);
 
-    // 起動時に現在のシーズンを計算して保存
-    this.currentSeason = await this.calculateCurrentSeason();
+    this.currentSeason = await this.getLatestSeason();
     
     await this.loadSettings();
     await this.updatePBDBLink();
     this.setupIntersectionObserver();
-
-    setInterval(async () => {
-      const newSeason = await this.calculateCurrentSeason();
-      if (newSeason !== this.currentSeason) {
-        this.currentSeason = newSeason;
-        // セレクトボックスの更新も行う
-        this.updateSeasonOptions();
-        await this.loadSettings();
-      }
-    }, this.UPDATE_INTERVAL);
+    this.startSeasonUpdateWatcher();
   }
 
 
+  // リトライ初期化やページ離脱で残留物が出ないよう、監視とDOMをまとめて掃除する。
   destroy() {
     clearTimeout(this.updateTimer);
+    clearInterval(this.seasonUpdateInterval);
+    this.intersectionObserver?.disconnect();
+
     if (this.elements.container) {
       this.elements.container.remove();
     }
@@ -405,22 +497,44 @@ class PokeLinker {
 
 let retryCount = 0;
 const MAX_RETRIES = 3;
+let activePokeLinker = null;
 
 
+// 初期化失敗時は指数的ではなく段階的に待ち時間を伸ばし、ページ側の描画完了を待つ。
+function scheduleRetry() {
+  if (retryCount >= MAX_RETRIES) {
+    return;
+  }
+
+  retryCount++;
+  setTimeout(initializePokeLinker, 1000 * retryCount);
+}
+
+
+function handleInitializationError(error) {
+  console.error('PokeLinkerの初期化に失敗しました:', error);
+  activePokeLinker?.destroy();
+  activePokeLinker = null;
+  scheduleRetry();
+}
+
+
+// 初期化をやり直す場合でも、前回インスタンスを片付けてから作り直す。
 function initializePokeLinker() {
   try {
+    activePokeLinker?.destroy();
+
     const pokeLinker = new PokeLinker();
-    pokeLinker.init().catch(() => {
-      if (retryCount < MAX_RETRIES) {
-        retryCount++;
-        setTimeout(initializePokeLinker, 1000 * retryCount);
-      }
-    });
-  } catch {
-    if (retryCount < MAX_RETRIES) {
-      retryCount++;
-      setTimeout(initializePokeLinker, 1000 * retryCount);
-    }
+    activePokeLinker = pokeLinker;
+
+    pokeLinker
+      .init()
+      .then(() => {
+        retryCount = 0;
+      })
+      .catch(handleInitializationError);
+  } catch (error) {
+    handleInitializationError(error);
   }
 }
 
@@ -433,8 +547,8 @@ if (document.readyState === 'loading') {
 
 
 window.addEventListener('unload', () => {
-  const pokeLinker = document.querySelector('.pokelinker-container')?.__pokeLinker;
-  if (pokeLinker) {
-    pokeLinker.destroy();
+  if (activePokeLinker) {
+    activePokeLinker.destroy();
+    activePokeLinker = null;
   }
 });

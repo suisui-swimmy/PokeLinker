@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "PokeLinker",
-    "version": "1.3",
-    "description": "「ポケモン徹底攻略」から「ポケモンバトルデータベース」へのリンクを生成、表示します。",
+    "version": "1.4",
+    "description": "「ポケモン徹底攻略(SV)」から「ポケモンバトルデータベース」へのリンクを生成、表示します。",
     "icons": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
