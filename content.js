@@ -237,7 +237,7 @@ class PokeLinker {
     const pbdbLink = document.createElement('a');
     pbdbLink.className = 'pokelinker-link disabled';
     pbdbLink.title = 'Open in PBDB';
-    pbdbLink.appendChild(document.createTextNode('PBDB'));
+    pbdbLink.appendChild(document.createTextNode('PBDB(SV)'));
 
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 48 48');
