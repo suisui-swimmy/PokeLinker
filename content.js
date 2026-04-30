@@ -1,14 +1,10 @@
 class PokeLinker {
   constructor() {
-    this.SEASON_START = new Date('2022-12-01T09:00:00+09:00');
     this.UPDATE_INTERVAL = 60000;
     this.DEBOUNCE_WAIT = 200;
     this.STYLE_ID = 'pokelinker-style';
-    // SVのシーズン更新終了に合わせて固定。再開時はこのフラグをtrueに戻す。
-    this.SEASON_AUTO_UPDATE_ENABLED = false;
-    this.FINAL_SEASON = 41;
     // select要素とchrome.storage.localで扱いやすいよう、シーズン値は文字列で統一する。
-    this.FIXED_SEASON_OPTIONS = [
+    const svSeasonOptions = [
       ['41', '41~(I)'],
       ['40', '40(I)'],
       ['39', '39(I)'],
@@ -51,12 +47,49 @@ class PokeLinker {
       ['2', '2(A)'],
       ['1', '1(A)'],
     ];
-    this.availableSeasons = new Set(this.FIXED_SEASON_OPTIONS.map(([value]) => value));
+
+    this.GAME_CONFIGS = {
+      sv: {
+        label: 'SV',
+        pagePattern: '/sv/zukan/',
+        linkText: 'PBDB(SV)',
+        baseUrl: 'https://sv.pokedb.tokyo/pokemon/show/',
+        seasonAutoUpdateEnabled: false,
+        seasonStart: new Date('2022-12-01T09:00:00+09:00'),
+        finalSeason: '41',
+        seasonOptions: svSeasonOptions,
+        rules: {
+          single: '0',
+          double: '1',
+        },
+      },
+      ch: {
+        label: 'CH',
+        pagePattern: '/ch/zukan/',
+        linkText: 'PBDB(CH)',
+        baseUrl: 'https://champs.pokedb.tokyo/pokemon/show/',
+        seasonAutoUpdateEnabled: false,
+        seasonStart: null,
+        finalSeason: 'M-1',
+        seasonOptions: [
+          ['M-1', 'M-1(M-A)'],
+        ],
+        rules: {
+          single: '0',
+          double: '1',
+        },
+      },
+    };
+
+    this.currentGame = this.detectCurrentGame();
+    this.gameConfig = this.GAME_CONFIGS[this.currentGame];
+    this.availableSeasons = new Set(this.gameConfig.seasonOptions.map(([value]) => value));
 
     this.settings = {
       battleType: null,
       season: null,
     };
+    this.settingsByGame = {};
     this.currentSeason = null;
     this.pokemonInfo = null;
 
@@ -69,14 +102,27 @@ class PokeLinker {
   }
 
 
+  detectCurrentGame() {
+    if (window.location.pathname.includes(this.GAME_CONFIGS.ch.pagePattern)) {
+      return 'ch';
+    }
+
+    return 'sv';
+  }
+
+
   // 保存済み設定を読み込み、現在のUI仕様に合う値へ正規化する。
   async loadSettings() {
     try {
-      const result = await chrome.storage.local.get(['battleType', 'season']);
+      const result = await chrome.storage.local.get(['battleType', 'season', 'settingsByGame']);
       this.settings.battleType = result.battleType || null;
-      
+      this.settingsByGame = (result.settingsByGame && typeof result.settingsByGame === 'object')
+        ? result.settingsByGame
+        : {};
+
       this.currentSeason = await this.getLatestSeason();
-      const storedSeason = result.season?.toString();
+      const storedSeason = this.settingsByGame[this.currentGame]?.season?.toString()
+        || result.season?.toString();
       const normalizedSeason = this.normalizeSeason(storedSeason || this.currentSeason);
       this.settings.season = normalizedSeason;
 
@@ -103,9 +149,18 @@ class PokeLinker {
 
   async saveSettings() {
     try {
+      this.settingsByGame = {
+        ...this.settingsByGame,
+        [this.currentGame]: {
+          ...this.settingsByGame[this.currentGame],
+          season: this.settings.season,
+        },
+      };
+
       await chrome.storage.local.set({
         battleType: this.settings.battleType,
         season: this.settings.season,
+        settingsByGame: this.settingsByGame,
       });
     } catch (error) {
       console.error('設定の保存に失敗しました:', error);
@@ -237,7 +292,7 @@ class PokeLinker {
     const pbdbLink = document.createElement('a');
     pbdbLink.className = 'pokelinker-link disabled';
     pbdbLink.title = 'Open in PBDB';
-    pbdbLink.appendChild(document.createTextNode('PBDB(SV)'));
+    pbdbLink.appendChild(document.createTextNode(this.gameConfig.linkText));
 
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 48 48');
@@ -294,7 +349,7 @@ class PokeLinker {
 
   // 固定シーズン一覧からドロップダウンを再構築し、保存済み値と表示を揃える。
   createSeasonOptions(select) {
-    for (const [value, label] of this.FIXED_SEASON_OPTIONS) {
+    for (const [value, label] of this.gameConfig.seasonOptions) {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = label;
@@ -306,30 +361,35 @@ class PokeLinker {
 
 
   async getLatestSeason() {
-    if (!this.SEASON_AUTO_UPDATE_ENABLED) {
-      return this.FINAL_SEASON;
+    if (!this.gameConfig.seasonAutoUpdateEnabled) {
+      return this.gameConfig.finalSeason;
     }
 
-    return this.calculateCurrentSeason();
+    return this.calculateCurrentSeason().toString();
   }
 
 
   // 保存済み値が古い最新シーズンを指していても、現行の固定一覧へ戻す。
   normalizeSeason(season) {
-    const seasonValue = season?.toString() || this.FINAL_SEASON.toString();
+    const seasonValue = season?.toString() || this.gameConfig.finalSeason;
     return this.availableSeasons.has(seasonValue)
       ? seasonValue
-      : this.FINAL_SEASON.toString();
+      : this.gameConfig.finalSeason;
   }
 
 
-  // 将来シーズン更新が再開したとき用に、月次シーズン計算ロジックは残しておく。
+  // 月次更新のゲームで再利用できるよう、開始月ベースのシーズン計算ロジックを分離しておく。
   async calculateCurrentSeason() {
+    const seasonStart = this.gameConfig.seasonStart;
+    if (!(seasonStart instanceof Date)) {
+      return this.gameConfig.finalSeason;
+    }
+
     const now = new Date();
-    const startYear = this.SEASON_START.getFullYear();
-    const startMonth = this.SEASON_START.getMonth();
+    const startYear = seasonStart.getFullYear();
+    const startMonth = seasonStart.getMonth();
     
-    // シーズン1=2022年12月として、経過月数からシーズン番号を算出する。
+    // 設定されたシーズン開始月を基準に、経過月数から現在シーズンを算出する。
     let seasonNumber = (now.getFullYear() - startYear) * 12 + (now.getMonth() - startMonth) + 1;
     
     // シーズン切り替えは毎月1日9:00想定のため、それ以前は前シーズン扱いにする。
@@ -341,9 +401,38 @@ class PokeLinker {
   }
 
 
+  isChampionsMegaPage() {
+    return this.currentGame === 'ch'
+      && /\/ch\/zukan\/n\d+(m|z)$/i.test(window.location.pathname);
+  }
+
+
+  getChampionsPokemonOverride() {
+    if (this.currentGame !== 'ch') {
+      return null;
+    }
+
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/ch/zukan/n670e' || path === '/ch/zukan/n670m') {
+      return {
+        nationalNumber: '0670',
+        formIndex: '05',
+      };
+    }
+
+    return null;
+  }
+
+
   // 図鑑ページから全国図鑑番号と現在表示中フォルムを拾い、PBDB用のIDへ変換する。
   async getPokemonInfo() {
     if (this.pokemonInfo) return this.pokemonInfo;
+
+    const championsOverride = this.getChampionsPokemonOverride();
+    if (championsOverride) {
+      this.pokemonInfo = championsOverride;
+      return this.pokemonInfo;
+    }
 
     const allTds = document.querySelectorAll('td.c1');
     let nationalNumberElement = null;
@@ -369,7 +458,10 @@ class PokeLinker {
     }
 
     let formIndex = 0;
-    if (formList) {
+    // PBDB側でフォーム別URLを持たないページは、URL解決可能なベースフォームへ丸める。
+    if (this.isChampionsMegaPage()) {
+      formIndex = 0;
+    } else if (formList) {
       const forms = Array.from(formList.querySelectorAll('li')).filter(li => !li.classList.contains('select_label'));
       const currentFormIndex = forms.findIndex(li => li.querySelector('strong'));
       formIndex = (currentFormIndex >= 0) ? currentFormIndex : 0;
@@ -390,22 +482,44 @@ class PokeLinker {
   }
 
 
+  disablePBDBLink() {
+    if (!this.elements.pbdbLink) return;
+
+    this.elements.pbdbLink.classList.add('disabled');
+    this.elements.pbdbLink.removeAttribute('href');
+  }
+
+
+  buildPBDBUrl(pokemonInfo) {
+    const rule = this.gameConfig.rules[this.settings.battleType];
+    if (!this.gameConfig.baseUrl || rule == null || !this.settings.season) {
+      return null;
+    }
+
+    return `${this.gameConfig.baseUrl}${pokemonInfo.nationalNumber}-${pokemonInfo.formIndex}?season=${encodeURIComponent(this.settings.season)}&rule=${encodeURIComponent(rule)}`;
+  }
+
+
   // リンク先はバトル種別と対象ポケモンが揃ったときだけ有効化する。
   async updatePBDBLink() {
     if (!this.elements.pbdbLink) return;
 
     if (!this.settings.battleType) {
-      this.elements.pbdbLink.classList.add('disabled');
-      this.elements.pbdbLink.removeAttribute('href');
+      this.disablePBDBLink();
       return;
     }
 
     const pokemonInfo = await this.getPokemonInfo();
-    if (!pokemonInfo) return;
+    if (!pokemonInfo) {
+      this.disablePBDBLink();
+      return;
+    }
 
-    const battleType = (this.settings.battleType === 'single') ? '0' : '1';
-
-    const url = `https://sv.pokedb.tokyo/pokemon/show/${pokemonInfo.nationalNumber}-${pokemonInfo.formIndex}?season=${this.settings.season}&rule=${battleType}`;
+    const url = this.buildPBDBUrl(pokemonInfo);
+    if (!url) {
+      this.disablePBDBLink();
+      return;
+    }
 
     this.elements.pbdbLink.href = url;
     this.elements.pbdbLink.classList.remove('disabled');
@@ -446,15 +560,15 @@ class PokeLinker {
   }
 
 
-  // 旧来の最新シーズン追従処理は、再利用できるよう別メソッドとして温存する。
+  // 自動更新が必要なゲームで再利用できるよう、シーズン追従処理は別メソッドに分けておく。
   startSeasonUpdateWatcher() {
-    if (!this.SEASON_AUTO_UPDATE_ENABLED) {
+    if (!this.gameConfig.seasonAutoUpdateEnabled) {
       return;
     }
 
     clearInterval(this.seasonUpdateInterval);
     this.seasonUpdateInterval = setInterval(async () => {
-      const newSeason = await this.calculateCurrentSeason();
+      const newSeason = (await this.calculateCurrentSeason()).toString();
       if (newSeason !== this.currentSeason) {
         this.currentSeason = newSeason;
         this.updateSeasonOptions();
