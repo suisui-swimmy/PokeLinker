@@ -48,6 +48,53 @@ class PokeLinker {
       ['1', '1(A)'],
     ];
 
+    const championsSeasonSchedule = {
+      fixedOptions: [
+        ['M-2', 'M-2(M-A)'],
+        ['M-1', 'M-1(M-A)'],
+      ],
+      fallbackStart: new Date('2026-06-17T11:00:00+09:00'),
+      fallbackFirstSeason: 3,
+    };
+
+    const getChampionsFallbackSeason = (now = new Date()) => {
+      const { fallbackStart, fallbackFirstSeason } = championsSeasonSchedule;
+      if (now < fallbackStart) {
+        return null;
+      }
+
+      let monthOffset = (
+        (now.getFullYear() - fallbackStart.getFullYear()) * 12
+        + (now.getMonth() - fallbackStart.getMonth())
+      );
+      const currentSeasonStart = new Date(fallbackStart);
+      currentSeasonStart.setMonth(fallbackStart.getMonth() + monthOffset);
+      if (now < currentSeasonStart) {
+        monthOffset--;
+      }
+
+      return (fallbackFirstSeason + Math.max(0, monthOffset)).toString();
+    };
+
+    const createChampionsSeasonOptions = (now = new Date()) => {
+      const options = [...championsSeasonSchedule.fixedOptions];
+      const fallbackSeason = getChampionsFallbackSeason(now);
+      if (!fallbackSeason) {
+        return options;
+      }
+
+      const latestSeason = Number(fallbackSeason);
+      for (
+        let season = championsSeasonSchedule.fallbackFirstSeason;
+        season <= latestSeason;
+        season++
+      ) {
+        options.unshift([season.toString(), season.toString()]);
+      }
+
+      return options;
+    };
+
     this.GAME_CONFIGS = {
       sv: {
         label: 'SV',
@@ -68,12 +115,12 @@ class PokeLinker {
         pagePattern: '/ch/zukan/',
         linkText: 'PBDB(CH)',
         baseUrl: 'https://champs.pokedb.tokyo/pokemon/show/',
-        seasonAutoUpdateEnabled: false,
+        seasonAutoUpdateEnabled: true,
         seasonStart: null,
-        finalSeason: 'M-1',
-        seasonOptions: [
-          ['M-1', 'M-1(M-A)'],
-        ],
+        finalSeason: 'M-2',
+        seasonOptions: createChampionsSeasonOptions(),
+        getSeasonOptions: createChampionsSeasonOptions,
+        getLatestSeason: () => getChampionsFallbackSeason() || 'M-2',
         rules: {
           single: '0',
           double: '1',
@@ -83,7 +130,7 @@ class PokeLinker {
 
     this.currentGame = this.detectCurrentGame();
     this.gameConfig = this.GAME_CONFIGS[this.currentGame];
-    this.availableSeasons = new Set(this.gameConfig.seasonOptions.map(([value]) => value));
+    this.refreshSeasonOptions();
 
     this.settings = {
       battleType: null,
@@ -99,6 +146,15 @@ class PokeLinker {
     this.seasonUpdateInterval = null;
 
     this.loadSettings();
+  }
+
+
+  refreshSeasonOptions() {
+    if (typeof this.gameConfig.getSeasonOptions === 'function') {
+      this.gameConfig.seasonOptions = this.gameConfig.getSeasonOptions();
+    }
+
+    this.availableSeasons = new Set(this.gameConfig.seasonOptions.map(([value]) => value));
   }
 
 
@@ -347,8 +403,10 @@ class PokeLinker {
   }
 
 
-  // 固定シーズン一覧からドロップダウンを再構築し、保存済み値と表示を揃える。
+  // ゲーム別シーズン一覧からドロップダウンを再構築し、保存済み値と表示を揃える。
   createSeasonOptions(select) {
+    this.refreshSeasonOptions();
+
     for (const [value, label] of this.gameConfig.seasonOptions) {
       const option = document.createElement('option');
       option.value = value;
@@ -361,6 +419,12 @@ class PokeLinker {
 
 
   async getLatestSeason() {
+    this.refreshSeasonOptions();
+
+    if (typeof this.gameConfig.getLatestSeason === 'function') {
+      return this.gameConfig.getLatestSeason().toString();
+    }
+
     if (!this.gameConfig.seasonAutoUpdateEnabled) {
       return this.gameConfig.finalSeason;
     }
@@ -554,7 +618,7 @@ class PokeLinker {
   updateSeasonOptions() {
     if (!this.elements.seasonSelect) return;
 
-    // 古い選択肢を捨てて、固定シーズン一覧から再描画する。
+    // 古い選択肢を捨てて、ゲーム別シーズン一覧から再描画する。
     this.elements.seasonSelect.replaceChildren();
     this.createSeasonOptions(this.elements.seasonSelect);
   }
@@ -568,7 +632,7 @@ class PokeLinker {
 
     clearInterval(this.seasonUpdateInterval);
     this.seasonUpdateInterval = setInterval(async () => {
-      const newSeason = (await this.calculateCurrentSeason()).toString();
+      const newSeason = (await this.getLatestSeason()).toString();
       if (newSeason !== this.currentSeason) {
         this.currentSeason = newSeason;
         this.updateSeasonOptions();
