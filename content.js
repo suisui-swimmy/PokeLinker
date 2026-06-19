@@ -55,25 +55,24 @@ class PokeLinker {
       ],
       fallbackStart: new Date('2026-06-17T11:00:00+09:00'),
       fallbackFirstSeason: 3,
+      fallbackIntervalDays: 21,
     };
 
     const getChampionsFallbackSeason = (now = new Date()) => {
-      const { fallbackStart, fallbackFirstSeason } = championsSeasonSchedule;
+      const {
+        fallbackStart,
+        fallbackFirstSeason,
+        fallbackIntervalDays,
+      } = championsSeasonSchedule;
       if (now < fallbackStart) {
         return null;
       }
 
-      let monthOffset = (
-        (now.getFullYear() - fallbackStart.getFullYear()) * 12
-        + (now.getMonth() - fallbackStart.getMonth())
-      );
-      const currentSeasonStart = new Date(fallbackStart);
-      currentSeasonStart.setMonth(fallbackStart.getMonth() + monthOffset);
-      if (now < currentSeasonStart) {
-        monthOffset--;
-      }
+      const intervalMs = fallbackIntervalDays * 24 * 60 * 60 * 1000;
+      const seasonOffset = Math.floor((now.getTime() - fallbackStart.getTime()) / intervalMs);
+      const seasonNumber = fallbackFirstSeason + Math.max(0, seasonOffset);
 
-      return (fallbackFirstSeason + Math.max(0, monthOffset)).toString();
+      return `M-${seasonNumber}`;
     };
 
     const createChampionsSeasonOptions = (now = new Date()) => {
@@ -83,13 +82,13 @@ class PokeLinker {
         return options;
       }
 
-      const latestSeason = Number(fallbackSeason);
+      const latestSeasonNumber = Number(fallbackSeason.replace('M-', ''));
       for (
         let season = championsSeasonSchedule.fallbackFirstSeason;
-        season <= latestSeason;
+        season <= latestSeasonNumber;
         season++
       ) {
-        options.unshift([season.toString(), season.toString()]);
+        options.unshift([`M-${season}`, `M-${season}(M-B)`]);
       }
 
       return options;
@@ -433,12 +432,16 @@ class PokeLinker {
   }
 
 
-  // 保存済み値が古い最新シーズンを指していても、現行の固定一覧へ戻す。
+  // 保存済み値が古い形式でも、現行のゲーム別シーズン一覧に合う値へ戻す。
   normalizeSeason(season) {
-    const seasonValue = season?.toString() || this.gameConfig.finalSeason;
+    let seasonValue = season?.toString() || this.currentSeason || this.gameConfig.finalSeason;
+    if (this.currentGame === 'ch' && /^\d+$/.test(seasonValue)) {
+      seasonValue = `M-${seasonValue}`;
+    }
+
     return this.availableSeasons.has(seasonValue)
       ? seasonValue
-      : this.gameConfig.finalSeason;
+      : (this.availableSeasons.has(this.currentSeason) ? this.currentSeason : this.gameConfig.finalSeason);
   }
 
 
