@@ -50,12 +50,16 @@ class PokeLinker {
 
     const championsSeasonSchedule = {
       fixedOptions: [
+        ['M-5', 'M-5(M-B)'],
+        ['M-4', 'M-4(M-B)'],
+        ['M-3', 'M-3(M-B)'],
         ['M-2', 'M-2(M-A)'],
         ['M-1', 'M-1(M-A)'],
       ],
-      fallbackStart: new Date('2026-06-17T11:00:00+09:00'),
-      fallbackFirstSeason: 3,
-      fallbackIntervalDays: 21,
+      // M-6は9月9日開始、10月7日10:59（日本時間）まで。以降は4週間ごと、当面M-Cを使う。
+      fallbackStart: new Date('2026-09-09T11:00:00+09:00'),
+      fallbackFirstSeason: 6,
+      fallbackIntervalDays: 28,
     };
 
     const getChampionsFallbackSeason = (now = new Date()) => {
@@ -88,7 +92,7 @@ class PokeLinker {
         season <= latestSeasonNumber;
         season++
       ) {
-        options.unshift([`M-${season}`, `M-${season}(M-B)`]);
+        options.unshift([`M-${season}`, `M-${season}(M-C)`]);
       }
 
       return options;
@@ -116,10 +120,10 @@ class PokeLinker {
         baseUrl: 'https://champs.pokedb.tokyo/pokemon/show/',
         seasonAutoUpdateEnabled: true,
         seasonStart: null,
-        finalSeason: 'M-2',
+        finalSeason: 'M-5',
         seasonOptions: createChampionsSeasonOptions(),
         getSeasonOptions: createChampionsSeasonOptions,
-        getLatestSeason: () => getChampionsFallbackSeason() || 'M-2',
+        getLatestSeason: () => getChampionsFallbackSeason() || 'M-5',
         rules: {
           single: '0',
           double: '1',
