@@ -1,5 +1,4 @@
 # PokeLinker
-https://chromewebstore.google.com/detail/pokelinker/pkgppnlbbeomjlfkaaganhfbcmcenmcl
 
 「ポケモン徹底攻略」の各ポケモンのページに「ポケモンバトルデータベース」へのリンクを生成し表示するChrome / Edge向けの拡張機能です。SV図鑑ページとチャンピオンズ図鑑ページに対応しています。
 
@@ -17,16 +16,7 @@ https://chromewebstore.google.com/detail/pokelinker/pkgppnlbbeomjlfkaaganhfbcmce
 - Microsoft Edge (最新バージョン)
 
 # インストール方法
-1. [リリース](https://github.com/suisui-swimmy/PokeLinker/releases)から最新バージョンの`PokeLinker.zip`(`Assets`内)をダウンロード
-2. 任意のフォルダで解凍
-### Google Chromeの場合
-3. 「拡張機能を管理」(`chrome://extensions/`)を開く
-4. 「デベロッパーモード」をオン(右上)
-5. 「パッケージ化されていない拡張機能を読み込む」から解凍した`PokeLinker`ファイルを選択(または、解凍した`PokeLinker`ファイルをブラウザ内にドラッグ&ドロップ)
-### Microsoft Edgeの場合
-3. 「拡張機能を管理」(`edge://extensions/`)を開く
-4. 「開発者モード」をオン(左下)
-5. 「展開して読み込む」から解凍した`PokeLinker`ファイルを選択(または、解凍した`PokeLinker`ファイルをブラウザ内にドラッグ&ドロップ)
+[Chrome Web Store](https://chromewebstore.google.com/detail/pokelinker/pkgppnlbbeomjlfkaaganhfbcmcenmcl)からインストールしてください。
 
 # お問い合わせ
 [X(@peixe0307)](https://x.com/peixe0307)
