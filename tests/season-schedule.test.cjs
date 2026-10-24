@@ -3,78 +3,58 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
+const bundled = require('../data/champions-seasons.json');
 
-const source = fs.readFileSync(path.join(__dirname, '../content.js'), 'utf8');
-
-async function setup(now, stored = {}, game = 'ch') {
-  let timestamp = Date.parse(now);
+async function setup(stored = {}, game = 'ch', initialCatalog = bundled) {
+  let catalog = structuredClone(initialCatalog);
   let watcher;
+  let rejectRequest = false;
+  let requests = 0;
   const storage = structuredClone(stored);
-  class Clock extends Date {
-    constructor(...args) { super(...(args.length ? args : [timestamp])); }
-    static now() { return timestamp; }
-  }
   const context = vm.createContext({
-    Date: Clock,
-    console,
+    console: { ...console, warn() {} },
     window: { location: { pathname: `/${game}/zukan/n1` }, addEventListener() {} },
-    document: {
-      readyState: 'loading',
-      addEventListener() {},
-      createElement() { return {}; },
+    document: { readyState: 'loading', addEventListener() {}, createElement() { return {}; } },
+    chrome: {
+      runtime: { async sendMessage() { requests++; if (rejectRequest) throw new Error('offline'); return { data: structuredClone(catalog) }; } },
+      storage: { local: {
+        async get() { return structuredClone(storage); },
+        async set(values) { Object.assign(storage, structuredClone(values)); },
+      } },
     },
-    chrome: { storage: { local: {
-      async get() { return structuredClone(storage); },
-      async set(values) { Object.assign(storage, structuredClone(values)); },
-    } } },
-    clearInterval() {},
+    clearTimeout() {}, clearInterval() {},
     setInterval(callback) { watcher = callback; return 1; },
   });
-  vm.runInContext(`${source}\nglobalThis.linker = new PokeLinker();`, context);
-  await new Promise(setImmediate);
-  const linker = context.linker;
-  const select = {
-    children: [],
-    appendChild(option) { this.children.push(option); },
-    replaceChildren() { this.children = []; },
-  };
+  for (const file of ['season-data.js', 'content.js']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
+  }
+  const linker = vm.runInContext('new PokeLinker()', context);
+  await linker.refreshChampionsSeasons();
+  await linker.loadSettings();
+  const select = { children: [], appendChild(option) { this.children.push(option); }, replaceChildren() { this.children = []; } };
   linker.elements.seasonSelect = select;
   linker.createSeasonOptions(select);
+  linker.startSeasonUpdateWatcher();
   return {
-    linker, storage, select,
-    async advance(date) { timestamp = Date.parse(date); await watcher(); },
+    linker, storage, select, requests: () => requests,
+    async update(data) { catalog = data; await watcher(); },
+    async disconnect() { rejectRequest = true; await watcher(); },
   };
 }
 
-test('M-6 starts at 11:00 JST; subsequent seasons start every 28 days', async () => {
-  for (const [date, expected] of [
-    ['2026-09-09T10:59:59.999+09:00', 'M-5'],
-    ['2026-09-09T11:00:00+09:00', 'M-6'],
-    ['2026-10-07T10:59:59.999+09:00', 'M-6'],
-    ['2026-10-07T11:00:00+09:00', 'M-7'],
-    ['2026-11-04T10:59:59.999+09:00', 'M-7'],
-    ['2026-11-04T11:00:00+09:00', 'M-8'],
-    ['2027-01-27T11:00:00+09:00', 'M-11'],
-  ]) {
-    const { linker, select } = await setup(date);
-    assert.equal(await linker.getLatestSeason(), expected, date);
-    assert.equal(select.children[0].value, expected, date);
-    assert.equal(select.children[0].textContent, `${expected}(${expected === 'M-5' ? 'M-B' : 'M-C'})`);
-    assert.equal(select.children.length, Number(expected.slice(2)));
-  }
-});
-
-test('dropdown removes premature M-7 and preserves historical regulation labels', async () => {
-  const { select } = await setup('2026-09-09T12:00:00+09:00');
+test('published season and regulation labels are displayed without extrapolating future dates', async () => {
+  const { linker, select } = await setup();
+  assert.equal(await linker.getLatestSeason(), 'M-7');
   assert.deepEqual(select.children.map(option => option.textContent), [
-    'M-6(M-C)', 'M-5(M-B)', 'M-4(M-B)', 'M-3(M-B)', 'M-2(M-A)', 'M-1(M-A)',
+    'M-7(M-C)', 'M-6(M-C)', 'M-5(M-B)', 'M-4(M-B)', 'M-3(M-B)', 'M-2(M-A)', 'M-1(M-A)',
   ]);
-  assert.equal(select.value, 'M-6');
+  assert.equal(select.value, 'M-7');
+  assert.equal(select.children[0].title, '2026-10-07〜2026-11-04（PBDB掲載期間）');
 });
 
-test('saved M-7 becomes M-6, URLs use the corrected season, SV setting survives', async () => {
-  const { linker, storage, select } = await setup('2026-09-09T12:00:00+09:00', {
-    battleType: 'double', settingsByGame: { ch: { season: 'M-7' }, sv: { season: '40' } },
+test('legacy saved selection survives; CH URLs use the actual PBDB option value', async () => {
+  const { linker, storage, select } = await setup({
+    battleType: 'double', settingsByGame: { ch: { season: '6' }, sv: { season: '40' } },
   });
   assert.equal(select.value, 'M-6');
   assert.equal(storage.settingsByGame.ch.season, 'M-6');
@@ -82,30 +62,62 @@ test('saved M-7 becomes M-6, URLs use the corrected season, SV setting survives'
   for (const [battle, rule] of [['single', '0'], ['double', '1']]) {
     linker.settings.battleType = battle;
     assert.equal(linker.buildPBDBUrl({ nationalNumber: '0001', formIndex: '00' }),
-      `https://champs.pokedb.tokyo/pokemon/show/0001-00?season=M-6&rule=${rule}`);
+      `https://champs.pokedb.tokyo/pokemon/show/0001-00?season=6&rule=${rule}`);
   }
 });
 
-test('valid saved historical selection is retained', async () => {
-  const { select } = await setup('2026-09-09T12:00:00+09:00', { season: 'M-5' });
+test('a new regulation is added while the selected historical season is retained', async () => {
+  const { linker, select, update } = await setup({ season: 'M-5' });
+  const next = structuredClone(bundled);
+  next.updatedAt = '2026-11-04T14:37:00Z';
+  next.latest = 'M-8';
+  next.seasons.unshift({ id: 'M-8', pbdbSeason: '8', regulation: 'M-D', startDate: '2026-11-04', endDate: '2026-12-09' });
+  await update(next);
+  assert.equal(linker.currentSeason, 'M-8');
+  assert.equal(select.children[0].textContent, 'M-8(M-D)');
   assert.equal(select.value, 'M-5');
 });
 
-test('open page gains M-7 at the boundary while retaining the selected season', async () => {
-  const { linker, select, advance } = await setup('2026-10-07T10:59:59+09:00');
-  linker.startSeasonUpdateWatcher();
-  await advance('2026-10-07T11:00:00+09:00');
-  assert.equal(linker.currentSeason, 'M-7');
-  assert.equal(select.children[0].textContent, 'M-7(M-C)');
-  assert.equal(select.value, 'M-6');
+test('same-season regulation correction is reflected without changing selection', async () => {
+  const { select, update } = await setup();
+  const corrected = structuredClone(bundled);
+  corrected.seasons[0].regulation = 'M-D';
+  await update(corrected);
+  assert.equal(select.children[0].textContent, 'M-7(M-D)');
+  assert.equal(select.value, 'M-7');
 });
 
-test('SV stays at season 41 and keeps its saved selection', async () => {
-  const { linker, select } = await setup('2026-11-04T11:00:00+09:00', {
-    settingsByGame: { sv: { season: '40' }, ch: { season: 'M-6' } },
-  }, 'sv');
+test('network failure and malformed updates preserve the usable list', async () => {
+  const { linker, select, update, disconnect } = await setup();
+  await update({ ...bundled, seasons: [] });
+  await disconnect();
+  assert.equal(linker.currentSeason, 'M-7');
+  assert.equal(select.children.length, 7);
+  assert.equal(select.value, 'M-7');
+});
+
+test('unpublished saved season is normalized to the confirmed current season', async () => {
+  const { storage, select } = await setup({ season: 'M-99' });
+  assert.equal(select.value, 'M-7');
+  assert.equal(storage.settingsByGame.ch.season, 'M-7');
+});
+
+test('an unavailable background worker at startup cannot erase a saved historical selection', async () => {
+  const { storage, select, update } = await setup({ season: 'M-5' }, 'ch', null);
+  assert.equal(storage.season, 'M-5');
+  assert.equal(select.children.length, 0);
+  await update(bundled);
+  assert.equal(select.value, 'M-5');
+  assert.equal(storage.season, 'M-5');
+});
+
+test('SV keeps its fixed list, selection and URL without requesting the feed', async () => {
+  const { linker, select, requests } = await setup({ battleType: 'single', settingsByGame: { sv: { season: '40' } } }, 'sv');
   assert.equal(await linker.getLatestSeason(), '41');
   assert.equal(select.children[0].textContent, '41~(I)');
   assert.equal(select.children.length, 41);
   assert.equal(select.value, '40');
+  assert.equal(requests(), 0);
+  assert.equal(linker.buildPBDBUrl({ nationalNumber: '0741', formIndex: '01' }),
+    'https://sv.pokedb.tokyo/pokemon/show/0741-01?season=40&rule=0');
 });

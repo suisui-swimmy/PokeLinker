@@ -48,55 +48,8 @@ class PokeLinker {
       ['1', '1(A)'],
     ];
 
-    const championsSeasonSchedule = {
-      fixedOptions: [
-        ['M-5', 'M-5(M-B)'],
-        ['M-4', 'M-4(M-B)'],
-        ['M-3', 'M-3(M-B)'],
-        ['M-2', 'M-2(M-A)'],
-        ['M-1', 'M-1(M-A)'],
-      ],
-      // M-6は9月9日開始、10月7日10:59（日本時間）まで。以降は4週間ごと、当面M-Cを使う。
-      fallbackStart: new Date('2026-09-09T11:00:00+09:00'),
-      fallbackFirstSeason: 6,
-      fallbackIntervalDays: 28,
-    };
-
-    const getChampionsFallbackSeason = (now = new Date()) => {
-      const {
-        fallbackStart,
-        fallbackFirstSeason,
-        fallbackIntervalDays,
-      } = championsSeasonSchedule;
-      if (now < fallbackStart) {
-        return null;
-      }
-
-      const intervalMs = fallbackIntervalDays * 24 * 60 * 60 * 1000;
-      const seasonOffset = Math.floor((now.getTime() - fallbackStart.getTime()) / intervalMs);
-      const seasonNumber = fallbackFirstSeason + Math.max(0, seasonOffset);
-
-      return `M-${seasonNumber}`;
-    };
-
-    const createChampionsSeasonOptions = (now = new Date()) => {
-      const options = [...championsSeasonSchedule.fixedOptions];
-      const fallbackSeason = getChampionsFallbackSeason(now);
-      if (!fallbackSeason) {
-        return options;
-      }
-
-      const latestSeasonNumber = Number(fallbackSeason.replace('M-', ''));
-      for (
-        let season = championsSeasonSchedule.fallbackFirstSeason;
-        season <= latestSeasonNumber;
-        season++
-      ) {
-        options.unshift([`M-${season}`, `M-${season}(M-C)`]);
-      }
-
-      return options;
-    };
+    // 日数から将来のシーズンやレギュレーションを推測せず、PBDB由来の一覧に追従する。
+    this.championsSeasonData = null;
 
     this.GAME_CONFIGS = {
       sv: {
@@ -120,10 +73,9 @@ class PokeLinker {
         baseUrl: 'https://champs.pokedb.tokyo/pokemon/show/',
         seasonAutoUpdateEnabled: true,
         seasonStart: null,
-        finalSeason: 'M-5',
-        seasonOptions: createChampionsSeasonOptions(),
-        getSeasonOptions: createChampionsSeasonOptions,
-        getLatestSeason: () => getChampionsFallbackSeason() || 'M-5',
+        finalSeason: null,
+        seasonOptions: [],
+        getLatestSeason: () => this.championsSeasonData?.latest || null,
         rules: {
           single: '0',
           double: '1',
@@ -148,7 +100,27 @@ class PokeLinker {
     this.intersectionObserver = null;
     this.seasonUpdateInterval = null;
 
-    this.loadSettings();
+    this.destroyed = false;
+    this.settingsLoaded = false;
+  }
+
+
+  async refreshChampionsSeasons() {
+    if (this.currentGame !== 'ch') return false;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'pokelinker:get-champions-seasons' });
+      const data = PokeLinkerSeasons.validateUpdate(response?.data, this.championsSeasonData);
+      if (this.destroyed) return false;
+      const changed = JSON.stringify(data) !== JSON.stringify(this.championsSeasonData);
+      this.championsSeasonData = data;
+      this.gameConfig.finalSeason = data.latest;
+      this.gameConfig.seasonOptions = data.seasons.map(season => [season.id, `${season.id}(${season.regulation})`]);
+      this.refreshSeasonOptions();
+      return changed;
+    } catch (error) {
+      console.warn('シーズン一覧の読み込みに失敗しました:', error.message);
+      return false;
+    }
   }
 
 
@@ -172,8 +144,11 @@ class PokeLinker {
 
   // 保存済み設定を読み込み、現在のUI仕様に合う値へ正規化する。
   async loadSettings() {
+    // 一覧の取得前に、保存済みの過去シーズンを「無効」として上書きしない。
+    if (this.currentGame === 'ch' && !this.championsSeasonData) return;
     try {
       const result = await chrome.storage.local.get(['battleType', 'season', 'settingsByGame']);
+      if (this.destroyed) return;
       this.settings.battleType = result.battleType || null;
       this.settingsByGame = (result.settingsByGame && typeof result.settingsByGame === 'object')
         ? result.settingsByGame
@@ -184,6 +159,7 @@ class PokeLinker {
         || result.season?.toString();
       const normalizedSeason = this.normalizeSeason(storedSeason || this.currentSeason);
       this.settings.season = normalizedSeason;
+      this.settingsLoaded = true;
 
       if (this.elements.singleCheck) {
         this.elements.singleCheck.checked = (this.settings.battleType === 'single');
@@ -414,6 +390,8 @@ class PokeLinker {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = label;
+      const period = this.championsSeasonData?.seasons.find(season => season.id === value);
+      if (period) option.title = `${period.startDate}〜${period.endDate}（PBDB掲載期間）`;
       select.appendChild(option);
     }
 
@@ -425,7 +403,7 @@ class PokeLinker {
     this.refreshSeasonOptions();
 
     if (typeof this.gameConfig.getLatestSeason === 'function') {
-      return this.gameConfig.getLatestSeason().toString();
+      return this.gameConfig.getLatestSeason();
     }
 
     if (!this.gameConfig.seasonAutoUpdateEnabled) {
@@ -567,7 +545,12 @@ class PokeLinker {
       return null;
     }
 
-    return `${this.gameConfig.baseUrl}${pokemonInfo.nationalNumber}-${pokemonInfo.formIndex}?season=${encodeURIComponent(this.settings.season)}&rule=${encodeURIComponent(rule)}`;
+    // CHの画面表示/保存はM-7、PBDBの選択欄とURLが使う値は7。
+    const season = this.currentGame === 'ch'
+      ? this.championsSeasonData?.seasons.find(entry => entry.id === this.settings.season)?.pbdbSeason
+      : this.settings.season;
+    if (!season) return null;
+    return `${this.gameConfig.baseUrl}${pokemonInfo.nationalNumber}-${pokemonInfo.formIndex}?season=${encodeURIComponent(season)}&rule=${encodeURIComponent(rule)}`;
   }
 
 
@@ -639,11 +622,19 @@ class PokeLinker {
 
     clearInterval(this.seasonUpdateInterval);
     this.seasonUpdateInterval = setInterval(async () => {
-      const newSeason = (await this.getLatestSeason()).toString();
-      if (newSeason !== this.currentSeason) {
+      const changed = await this.refreshChampionsSeasons();
+      if (this.destroyed) return;
+      const newSeason = await this.getLatestSeason();
+      if (changed || newSeason !== this.currentSeason) {
         this.currentSeason = newSeason;
+        if (!this.settingsLoaded) await this.loadSettings();
+        const normalized = this.normalizeSeason(this.settings.season);
+        if (normalized !== this.settings.season) {
+          this.settings.season = normalized;
+          await this.saveSettings();
+        }
         this.updateSeasonOptions();
-        await this.loadSettings();
+        await this.updatePBDBLink();
       }
     }, this.UPDATE_INTERVAL);
   }
@@ -655,6 +646,8 @@ class PokeLinker {
     const titleElement = document.querySelector('h1 span');
     if (!titleElement) return;
 
+    await this.refreshChampionsSeasons();
+    if (this.destroyed) return;
     const linkContainer = this.createLinkElements();
     titleElement.parentNode.insertAdjacentElement('afterend', linkContainer);
 
@@ -669,6 +662,7 @@ class PokeLinker {
 
   // リトライ初期化やページ離脱で残留物が出ないよう、監視とDOMをまとめて掃除する。
   destroy() {
+    this.destroyed = true;
     clearTimeout(this.updateTimer);
     clearInterval(this.seasonUpdateInterval);
     this.intersectionObserver?.disconnect();

@@ -34,3 +34,6 @@ debug.log
 *.tmp
 *.temp
 .cache/
+
+# ローカルの管理者向け導入・運用手順
+/SEASON_SYNC_SETUP.local.md
