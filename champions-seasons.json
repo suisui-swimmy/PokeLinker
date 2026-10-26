@@ -1,55 +1,76 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "game": "ch",
   "updatedAt": "2026-10-24T05:13:05.087Z",
-  "latest": "M-7",
+  "latest": "7",
   "seasons": [
     {
-      "id": "M-7",
-      "pbdbSeason": "7",
+      "id": "7",
+      "name": "M-7",
       "regulation": "M-C",
+      "legacyIds": [
+        "M-7"
+      ],
       "startDate": "2026-10-07",
       "endDate": "2026-11-04"
     },
     {
-      "id": "M-6",
-      "pbdbSeason": "6",
+      "id": "6",
+      "name": "M-6",
       "regulation": "M-C",
+      "legacyIds": [
+        "M-6"
+      ],
       "startDate": "2026-09-09",
       "endDate": "2026-10-07"
     },
     {
-      "id": "M-5",
-      "pbdbSeason": "5",
+      "id": "5",
+      "name": "M-5",
       "regulation": "M-B",
+      "legacyIds": [
+        "M-5"
+      ],
       "startDate": "2026-08-05",
       "endDate": "2026-09-09"
     },
     {
-      "id": "M-4",
-      "pbdbSeason": "4",
+      "id": "4",
+      "name": "M-4",
       "regulation": "M-B",
+      "legacyIds": [
+        "M-4"
+      ],
       "startDate": "2026-07-08",
       "endDate": "2026-08-05"
     },
     {
-      "id": "M-3",
-      "pbdbSeason": "3",
+      "id": "3",
+      "name": "M-3",
       "regulation": "M-B",
+      "legacyIds": [
+        "M-3"
+      ],
       "startDate": "2026-06-17",
       "endDate": "2026-07-08"
     },
     {
-      "id": "M-2",
-      "pbdbSeason": "2",
+      "id": "2",
+      "name": "M-2",
       "regulation": "M-A",
+      "legacyIds": [
+        "M-2"
+      ],
       "startDate": "2026-05-13",
       "endDate": "2026-06-17"
     },
     {
-      "id": "M-1",
-      "pbdbSeason": "1",
+      "id": "1",
+      "name": "M-1",
       "regulation": "M-A",
+      "legacyIds": [
+        "M-1"
+      ],
       "startDate": "2026-04-08",
       "endDate": "2026-05-13"
     }
