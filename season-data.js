@@ -7,38 +7,61 @@ const PokeLinkerSeasons = (() => {
   }
 
   function validate(data) {
-    if (data?.schemaVersion !== 1 || data.game !== 'ch'
+    if (![1, 2].includes(data?.schemaVersion) || data.game !== 'ch'
       || typeof data.updatedAt !== 'string' || !Number.isFinite(Date.parse(data.updatedAt))
       || !Array.isArray(data.seasons) || !data.seasons.length || data.seasons.length > 500) {
       throw new Error('シーズン一覧の形式が不正です。');
     }
+    // v1のidは表示名だった。旧キャッシュ/配信も読み、PBDBの値を共通の識別値にする。
+    const legacy = data.schemaVersion === 1;
+    const latest = legacy ? data.seasons.find(season => season?.id === data.latest)?.pbdbSeason : data.latest;
     const seen = new Set();
     const seasons = data.seasons.map(season => {
-      if (!season || typeof season.id !== 'string' || !/^M-[1-9]\d{0,3}$/.test(season.id) || seen.has(season.id)
-        || season.pbdbSeason !== season.id.slice(2) || typeof season.regulation !== 'string' || !/^M-[A-Z]{1,3}$/.test(season.regulation)
+      const id = legacy ? season?.pbdbSeason : season?.id;
+      const name = legacy ? season?.id : season?.name;
+      const legacyIds = legacy ? [season?.id] : (season?.legacyIds ?? []);
+      if (!season || !validText(id, 128) || seen.has(id) || !validText(name, 80)
+        || !validText(season.regulation, 80)
+        || !Array.isArray(legacyIds) || legacyIds.length > 20 || legacyIds.some(value => !validText(value, 80))
         || !validDate(season.startDate) || !validDate(season.endDate)
         || season.startDate >= season.endDate) {
         throw new Error('シーズン番号・レギュレーション・期間が不正です。');
       }
-      seen.add(season.id);
+      seen.add(id);
       return {
-        id: season.id, pbdbSeason: season.pbdbSeason, regulation: season.regulation,
+        id, name, regulation: season.regulation, legacyIds: [...new Set(legacyIds)],
         startDate: season.startDate, endDate: season.endDate,
       };
-    }).sort((a, b) => Number(b.pbdbSeason) - Number(a.pbdbSeason));
-    if (!seen.has(data.latest)) throw new Error('最新シーズンが一覧にありません。');
-    return { schemaVersion: 1, game: 'ch', updatedAt: data.updatedAt, latest: data.latest, seasons };
+    });
+    // 選択肢の順序もPBDBに従い、表示名や識別値を数値として並び替えない。
+    if (!seen.has(latest)) throw new Error('最新シーズンが一覧にありません。');
+    return { schemaVersion: 2, game: 'ch', updatedAt: data.updatedAt, latest, seasons };
+  }
+
+  function validText(value, maxLength) {
+    return typeof value === 'string' && value.length > 0 && value.length <= maxLength
+      && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
   }
 
   // 空の取得結果や古い応答で、配信済みの選択肢を失わない。
   function validateUpdate(data, previous) {
     const next = validate(data);
-    if (previous && (Date.parse(next.updatedAt) < Date.parse(previous.updatedAt)
-      || Number(next.latest.slice(2)) < Number(previous.latest.slice(2))
-      || previous.seasons.some(old => !next.seasons.some(season => season.id === old.id)))) {
-      throw new Error('取得結果が古いか、既存のシーズンが欠落しています。');
+    if (previous) {
+      const before = validate(previous);
+      const current = next.seasons.find(season => season.id === next.latest);
+      const oldCurrent = before.seasons.find(season => season.id === before.latest);
+      if (Date.parse(next.updatedAt) < Date.parse(before.updatedAt)
+        || (current.id !== oldCurrent.id && current.startDate < oldCurrent.startDate)
+        || before.seasons.some(old => !next.seasons.some(season => season.id === old.id))) {
+        throw new Error('取得結果が古いか、既存のシーズンが欠落しています。');
+      }
+      // 表示名が変更されても、v1で保存した選択を引き継げるようにする。
+      for (const season of next.seasons) {
+        const old = before.seasons.find(entry => entry.id === season.id);
+        season.legacyIds = [...new Set([...season.legacyIds, ...(old?.legacyIds || [])])];
+      }
     }
-    return next;
+    return validate(next);
   }
 
   async function readText(response, maxBytes) {

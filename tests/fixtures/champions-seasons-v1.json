@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "game": "ch",
+  "updatedAt": "2026-10-24T05:13:05.087Z",
+  "latest": "M-7",
+  "seasons": [
+    {
+      "id": "M-7",
+      "pbdbSeason": "7",
+      "regulation": "M-C",
+      "startDate": "2026-10-07",
+      "endDate": "2026-11-04"
+    },
+    {
+      "id": "M-6",
+      "pbdbSeason": "6",
+      "regulation": "M-C",
+      "startDate": "2026-09-09",
+      "endDate": "2026-10-07"
+    },
+    {
+      "id": "M-5",
+      "pbdbSeason": "5",
+      "regulation": "M-B",
+      "startDate": "2026-08-05",
+      "endDate": "2026-09-09"
+    },
+    {
+      "id": "M-4",
+      "pbdbSeason": "4",
+      "regulation": "M-B",
+      "startDate": "2026-07-08",
+      "endDate": "2026-08-05"
+    },
+    {
+      "id": "M-3",
+      "pbdbSeason": "3",
+      "regulation": "M-B",
+      "startDate": "2026-06-17",
+      "endDate": "2026-07-08"
+    },
+    {
+      "id": "M-2",
+      "pbdbSeason": "2",
+      "regulation": "M-A",
+      "startDate": "2026-05-13",
+      "endDate": "2026-06-17"
+    },
+    {
+      "id": "M-1",
+      "pbdbSeason": "1",
+      "regulation": "M-A",
+      "startDate": "2026-04-08",
+      "endDate": "2026-05-13"
+    }
+  ]
+}

@@ -31,12 +31,12 @@ function setup(stored = {}, response = () => Response.json(bundled)) {
 test('concurrent tabs share one feed request, then use the persistent hourly cache', async () => {
   const { get, storage, requests } = setup();
   const [a, b] = await Promise.all([get(), get()]);
-  assert.equal(a.latest, 'M-7');
-  assert.equal(b.latest, 'M-7');
+  assert.equal(a.latest, '7');
+  assert.equal(b.latest, '7');
   await get();
   assert.equal(requests(), 1);
   const restarted = setup(storage);
-  assert.equal((await restarted.get()).latest, 'M-7');
+  assert.equal((await restarted.get()).latest, '7');
   assert.equal(restarted.requests(), 0);
 });
 
@@ -53,7 +53,22 @@ test('offline or invalid feed preserves last good data and suppresses repeated r
 
 test('first offline use falls back to the bundled catalog', async () => {
   const { get } = setup({}, () => { throw new Error('offline'); });
-  assert.equal((await get()).latest, 'M-7');
+  assert.equal((await get()).latest, '7');
+});
+
+test('v1 cached catalogs and still-v1 remote feeds remain readable', async () => {
+  const old = structuredClone(require('./fixtures/champions-seasons-v1.json'));
+  old.updatedAt = '2026-10-26T00:00:00Z';
+  old.seasons[0].regulation = 'M-D';
+  const cached = setup({ championsCatalog: old, seasonFeedNextCheckAt: Date.now() + 3600000 });
+  assert.equal((await cached.get()).seasons[0].regulation, 'M-D');
+  assert.equal(cached.requests(), 0);
+  const remote = setup({}, () => Response.json(old));
+  const result = await remote.get();
+  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.latest, '7');
+  assert.equal(result.seasons[0].name, 'M-7');
+  assert.equal(remote.storage.championsCatalog.schemaVersion, 2);
 });
 
 test('requests from unrelated pages/extensions are ignored without fetching', () => {
@@ -72,5 +87,5 @@ test('the authorized content script receives data through the async message resp
     assert.equal(listener({ type: 'pokelinker:get-champions-seasons' },
       { id: 'test-extension', url: 'https://yakkun.com/ch/zukan/n1' }, resolve), true);
   });
-  assert.equal(data.data.latest, 'M-7');
+  assert.equal(data.data.latest, '7');
 });

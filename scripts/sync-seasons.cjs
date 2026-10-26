@@ -10,24 +10,38 @@ function dateFromLabel(value) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
+function decodeText(value) {
+  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (entity, key) => {
+    if (!key.startsWith('#')) return named[key.toLowerCase()];
+    const hex = key.slice(0, 2).toLowerCase() === '#x';
+    const code = Number.parseInt(key.slice(hex ? 2 : 1), hex ? 16 : 10);
+    if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) throw new Error('HTML文字参照が不正です。');
+    return String.fromCodePoint(code);
+  });
+}
+
 function parseSeasons(html, now = new Date()) {
   // ランダムなidではなく、シーズン選択欄の意味を表すname属性で対象を限定する。
   const selects = [...html.matchAll(/<select\b[^>]*\bname\s*=\s*["']season["'][^>]*>([\s\S]*?)<\/select>/gi)];
   if (selects.length !== 1) throw new Error('シーズン選択欄を一意に取得できません。');
   let latest;
   const seasons = [...selects[0][1].matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)].map(([, attributes, body]) => {
-    const value = attributes.match(/\bvalue\s*=\s*["']([1-9]\d*)["']/i)?.[1];
-    const text = body.replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ').trim();
-    const match = text.match(/^シーズン(M-\d+)\s*\((M-[A-Z]+)\)\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*-\s*(\d{4}\/\d{1,2}\/\d{1,2})$/);
+    const rawValue = attributes.match(/\bvalue\s*=\s*(["'])(.*?)\1/i)?.[2];
+    const value = rawValue === undefined ? null : decodeText(rawValue);
+    // 文字列として取り込み、シーズン/レギュレーションの接頭辞や番号は決め打ちしない。
+    if (/<[^>]*>/.test(body)) throw new Error('シーズン選択肢に予期しないHTMLがあります。');
+    const text = decodeText(body).replace(/\s+/g, ' ').trim();
+    const match = text.match(/^シーズン\s*(.+?)\s*[（(]([^()（）]+)[）)]\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*-\s*(\d{4}\/\d{1,2}\/\d{1,2})$/);
     if (!value || !match) throw new Error('シーズン選択肢の形式が変わっています。');
     if (/(?:^|\s)selected(?:\s|=|$)/i.test(attributes)) {
       if (latest) throw new Error('最新シーズンが複数選択されています。');
-      latest = match[1];
+      latest = value;
     }
-    return { id: match[1], pbdbSeason: value, regulation: match[2], startDate: dateFromLabel(match[3]), endDate: dateFromLabel(match[4]) };
+    return { id: value, name: match[1].trim(), regulation: match[2].trim(), startDate: dateFromLabel(match[3]), endDate: dateFromLabel(match[4]) };
   });
   // 先頭や最大番号から推測せず、PBDBが選択している現在シーズンを採用する。
-  return validate({ schemaVersion: 1, game: 'ch', updatedAt: now.toISOString(), latest, seasons });
+  return validate({ schemaVersion: 2, game: 'ch', updatedAt: now.toISOString(), latest, seasons });
 }
 
 function nextCheckAfter(response, now) {

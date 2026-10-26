@@ -3,6 +3,8 @@ class PokeLinker {
     this.UPDATE_INTERVAL = 60000;
     this.DEBOUNCE_WAIT = 200;
     this.STYLE_ID = 'pokelinker-style';
+    // PBDBの識別値は空文字を許可しないため、「最新」の選択値に使っても衝突しない。
+    this.LATEST_SEASON_VALUE = '';
     // select要素とchrome.storage.localで扱いやすいよう、シーズン値は文字列で統一する。
     const svSeasonOptions = [
       ['41', '41~(I)'],
@@ -114,7 +116,7 @@ class PokeLinker {
       const changed = JSON.stringify(data) !== JSON.stringify(this.championsSeasonData);
       this.championsSeasonData = data;
       this.gameConfig.finalSeason = data.latest;
-      this.gameConfig.seasonOptions = data.seasons.map(season => [season.id, `${season.id}(${season.regulation})`]);
+      this.gameConfig.seasonOptions = data.seasons.map(season => [season.id, `${season.name}(${season.regulation})`]);
       this.refreshSeasonOptions();
       return changed;
     } catch (error) {
@@ -155,9 +157,11 @@ class PokeLinker {
         : {};
 
       this.currentSeason = await this.getLatestSeason();
+      // ゲーム別保存へ移行済みなら、別ゲームの共通season値を流用しない。
+      // CHの識別値も数字になりうるため、SVのシーズンと混線させない。
       const storedSeason = this.settingsByGame[this.currentGame]?.season?.toString()
-        || result.season?.toString();
-      const normalizedSeason = this.normalizeSeason(storedSeason || this.currentSeason);
+        ?? (Object.keys(this.settingsByGame).length === 0 ? result.season?.toString() : null);
+      const normalizedSeason = this.normalizeSeason(storedSeason ?? this.currentSeason);
       this.settings.season = normalizedSeason;
       this.settingsLoaded = true;
 
@@ -171,7 +175,7 @@ class PokeLinker {
         this.elements.seasonSelect.value = this.settings.season;
       }
 
-      if (storedSeason !== normalizedSeason) {
+      if (storedSeason !== normalizedSeason || !this.settingsByGame[this.currentGame]) {
         await this.saveSettings();
       }
 
@@ -386,6 +390,15 @@ class PokeLinker {
   createSeasonOptions(select) {
     this.refreshSeasonOptions();
 
+    const latestOption = document.createElement('option');
+    latestOption.value = this.LATEST_SEASON_VALUE;
+    latestOption.textContent = '最新';
+    const currentLabel = this.gameConfig.seasonOptions.find(([value]) => value === this.resolveSeason(this.LATEST_SEASON_VALUE))?.[1];
+    latestOption.title = currentLabel ? `現在: ${currentLabel}` : '最新のシーズンに追従';
+    select.appendChild(latestOption);
+    // 初回に一覧を取得できなかった場合は、設定を読み込めるまで操作を待つ。
+    select.disabled = this.availableSeasons.size === 0;
+
     for (const [value, label] of this.gameConfig.seasonOptions) {
       const option = document.createElement('option');
       option.value = value;
@@ -416,14 +429,23 @@ class PokeLinker {
 
   // 保存済み値が古い形式でも、現行のゲーム別シーズン一覧に合う値へ戻す。
   normalizeSeason(season) {
+    if (season === this.LATEST_SEASON_VALUE) return this.LATEST_SEASON_VALUE;
     let seasonValue = season?.toString() || this.currentSeason || this.gameConfig.finalSeason;
-    if (this.currentGame === 'ch' && /^\d+$/.test(seasonValue)) {
-      seasonValue = `M-${seasonValue}`;
+    if (this.currentGame === 'ch' && !this.availableSeasons.has(seasonValue)) {
+      const matches = this.championsSeasonData?.seasons.filter(entry => entry.legacyIds.includes(seasonValue)) || [];
+      if (matches.length === 1) seasonValue = matches[0].id;
     }
 
     return this.availableSeasons.has(seasonValue)
       ? seasonValue
       : (this.availableSeasons.has(this.currentSeason) ? this.currentSeason : this.gameConfig.finalSeason);
+  }
+
+
+  // 「最新」は選択として保存し、リンク作成時に配信データの実際の識別値へ解決する。
+  resolveSeason(season) {
+    if (season !== this.LATEST_SEASON_VALUE) return season;
+    return this.gameConfig.getLatestSeason?.() ?? this.gameConfig.finalSeason;
   }
 
 
@@ -541,14 +563,15 @@ class PokeLinker {
 
   buildPBDBUrl(pokemonInfo) {
     const rule = this.gameConfig.rules[this.settings.battleType];
-    if (!this.gameConfig.baseUrl || rule == null || !this.settings.season) {
+    const selectedSeason = this.resolveSeason(this.settings.season);
+    if (!this.gameConfig.baseUrl || rule == null || !selectedSeason) {
       return null;
     }
 
-    // CHの画面表示/保存はM-7、PBDBの選択欄とURLが使う値は7。
+    // CHは表示名ではなく、PBDBの選択欄の識別値を保存・URL生成に共用する。
     const season = this.currentGame === 'ch'
-      ? this.championsSeasonData?.seasons.find(entry => entry.id === this.settings.season)?.pbdbSeason
-      : this.settings.season;
+      ? this.championsSeasonData?.seasons.find(entry => entry.id === selectedSeason)?.id
+      : selectedSeason;
     if (!season) return null;
     return `${this.gameConfig.baseUrl}${pokemonInfo.nationalNumber}-${pokemonInfo.formIndex}?season=${encodeURIComponent(season)}&rule=${encodeURIComponent(rule)}`;
   }
