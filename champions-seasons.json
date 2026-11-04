@@ -1,9 +1,17 @@
 {
   "schemaVersion": 2,
   "game": "ch",
-  "updatedAt": "2026-10-24T05:13:05.087Z",
+  "updatedAt": "2026-11-04T11:49:02.224Z",
   "latest": "7",
   "seasons": [
+    {
+      "id": "8",
+      "name": "M-8",
+      "regulation": "M-C",
+      "legacyIds": [],
+      "startDate": "2026-11-04",
+      "endDate": "2026-12-02"
+    },
     {
       "id": "7",
       "name": "M-7",
