@@ -25,7 +25,6 @@ function parseSeasons(html, now = new Date()) {
   // ランダムなidではなく、シーズン選択欄の意味を表すname属性で対象を限定する。
   const selects = [...html.matchAll(/<select\b[^>]*\bname\s*=\s*["']season["'][^>]*>([\s\S]*?)<\/select>/gi)];
   if (selects.length !== 1) throw new Error('シーズン選択欄を一意に取得できません。');
-  let latest;
   const seasons = [...selects[0][1].matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)].map(([, attributes, body]) => {
     const rawValue = attributes.match(/\bvalue\s*=\s*(["'])(.*?)\1/i)?.[2];
     const value = rawValue === undefined ? null : decodeText(rawValue);
@@ -34,14 +33,17 @@ function parseSeasons(html, now = new Date()) {
     const text = decodeText(body).replace(/\s+/g, ' ').trim();
     const match = text.match(/^シーズン\s*(.+?)\s*[（(]([^()（）]+)[）)]\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*-\s*(\d{4}\/\d{1,2}\/\d{1,2})$/);
     if (!value || !match) throw new Error('シーズン選択肢の形式が変わっています。');
-    if (/(?:^|\s)selected(?:\s|=|$)/i.test(attributes)) {
-      if (latest) throw new Error('最新シーズンが複数選択されています。');
-      latest = value;
-    }
     return { id: value, name: match[1].trim(), regulation: match[2].trim(), startDate: dateFromLabel(match[3]), endDate: dateFromLabel(match[4]) };
   });
-  // 先頭や最大番号から推測せず、PBDBが選択している現在シーズンを採用する。
-  return validate({ schemaVersion: 2, game: 'ch', updatedAt: now.toISOString(), latest, seasons });
+  // 日付計算の前に全件検証する。ここでの先頭IDは検証用で、最新の判定には使わない。
+  const catalog = validate({ schemaVersion: 2, game: 'ch', updatedAt: now.toISOString(), latest: seasons[0]?.id, seasons });
+  // PBDBの初期選択は開催中と一致しない場合がある。掲載済みの開始日と日本時間11:00で判定する。
+  const started = catalog.seasons.filter(season => Date.parse(`${season.startDate}T11:00:00+09:00`) <= now.getTime());
+  if (!started.length) throw new Error('開始済みのシーズンが一覧にありません。');
+  const latestStartDate = started.reduce((date, season) => season.startDate > date ? season.startDate : date, '');
+  const latestSeasons = started.filter(season => season.startDate === latestStartDate);
+  if (latestSeasons.length !== 1) throw new Error('開始日が同じ最新シーズンが複数あります。');
+  return { ...catalog, latest: latestSeasons[0].id };
 }
 
 function nextCheckAfter(response, now) {

@@ -195,7 +195,7 @@ test('selecting latest persists the mode and automatically updates the visible l
   assert.match(reloaded.link.href, /season=next-series&rule=1$/);
 });
 
-test('latest follows the source-selected current season, not the first preannounced option', async () => {
+test('latest follows the catalog current season, not the first preannounced option', async () => {
   const next = nextCatalog();
   next.latest = '7';
   const { select, link } = await setup({ battleType: 'single', settingsByGame: { ch: { season: '' } } }, 'ch', next);
@@ -203,6 +203,27 @@ test('latest follows the source-selected current season, not the first preannoun
   assert.equal(select.children[1].textContent, 'Z-1(特別ルール)');
   assert.equal(select.children[0].title, '現在: M-7(M-C)');
   assert.match(link.href, /season=7&rule=0$/);
+});
+
+test('workflow parsing updates the latest UI and link to M-8 even when HTML selects M-7', async () => {
+  const { syncSeasons } = require('../scripts/sync-seasons.cjs');
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures/pbdb-season-select.html'), 'utf8')
+    .replace('<option value="7" selected>', '<option value="8">シーズンM-8 (M-C) 2026/11/4 - 2026/12/2</option><option value="7" selected>');
+  const { catalog, outcome } = await syncSeasons({
+    previous: bundled, now: new Date('2026-11-04T21:08:00+09:00'),
+    fetchImpl: async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
+  });
+  assert.equal(outcome, 'updated');
+  const latest = await setup({ battleType: 'double', settingsByGame: { ch: { season: '' } } });
+  await latest.update(catalog);
+  assert.equal(latest.select.value, '');
+  assert.equal(latest.select.children[0].title, '現在: M-8(M-C)');
+  assert.equal(latest.select.children[1].textContent, 'M-8(M-C)');
+  assert.match(latest.link.href, /season=8&rule=1$/);
+  const fixed = await setup({ battleType: 'single', settingsByGame: { ch: { season: '7' } } });
+  await fixed.update(catalog);
+  assert.equal(fixed.select.value, '7');
+  assert.match(fixed.link.href, /season=7&rule=0$/);
 });
 
 test('switching from latest to a fixed season stops link following while the list still updates', async () => {
